@@ -4,10 +4,27 @@ import time
 import requests
 from bs4 import BeautifulSoup
 
+from datetime import datetime
+
+def get_current_academic_year():
+    # 現在の日付を取得
+    now = datetime.now()
+    current_year = now.year
+    current_month = now.month
+
+    # 1月〜3月の場合は、前年の年度になるため1を引く
+    if current_month in [1, 2, 3]:
+        academic_year = current_year - 1
+    else:
+        academic_year = current_year
+
+    return academic_year
+
+
 # ==============================================================================
 # 設定項目
 # ==============================================================================
-YEAR = 2026
+YEAR = get_current_academic_year()  # クローリング対象の年度（例: 2024）
 BASE_URL = "https://syllabus.eden.miyazaki-u.ac.jp/syllabus"
 # GitHub Actions実行時（プロジェクトルート）から見た出力先パス
 OUTPUT_FILE = "web/assets/syllabus_master.json"

@@ -55,47 +55,17 @@ class AppStorage {
 
   /// 各講義の 欠席数(absence) と 遅刻数(lateness)
   static Map<String, Map<String, int>> _attendanceCounts = {
-    'M001': {'absence': 0, 'lateness': 0},
-    'M002': {'absence': 1, 'lateness': 2}, 
-    'M003': {'absence': 0, 'lateness': 0},
+    
   };
 
   /// シラバス情報
   static Map<String, Map<String, dynamic>> syllabusMaster = {
-    'M001': {
-      'id': 'M001',
-      'title': '情報社会論',
-      'room': '木花 A202',
-      'professor': '宮大 太郎 教授',
-      'type': 'liberal',
-      'evaluation': '試験: 50%, レポート: 50%',
-      'latenessRate': 3,
-    },
-    'M002': {
-      'id': 'M002',
-      'title': 'データ構造とアルゴリズム',
-      'room': '木花 D101',
-      'professor': '清武 次郎 准教授',
-      'type': 'major',
-      'evaluation': '中間課題: 40%, 期末試験: 60%',
-      'latenessRate': 3,
-    },
-    'M003': {
-      'id': 'M003',
-      'title': 'オペレーティングシステム',
-      'room': '木花 A301',
-      'professor': '橘 一郎 講師',
-      'type': 'major',
-      'evaluation': '期末レポート: 100%',
-      'latenessRate': 2,
-    },
+    
   };
 
   /// 時間割配置データ
   static Map<int, Map<int, String>> userTimetableCodes = {
-    0: {1: 'M001'}, // 月曜2限
-    2: {2: 'M002'}, // 水曜3限
-    4: {0: 'M003'}, // 金曜1限
+    
   };
 
   // ストレージ保存用の固定キー名

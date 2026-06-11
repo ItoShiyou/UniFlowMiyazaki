@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:storage/app_storage.dart'; // 🚨 プロジェクト名に合わせてパスを調整してください
-import 'package:services/syllabus_service.dart';
+
+// 🚨 プロジェクト名（uniflow_miyazaki）を頭に付け、実際の配置パスに合わせます
+import 'package:uniflow_miyazaki/storage/app_storage.dart'; 
+import 'package:uniflow_miyazaki/services/syllabus_service.dart';
 
 import 'dart:convert'; // jsonEncode / jsonDecode 用
 import 'package:shared_preferences/shared_preferences.dart'; // SharedPreferences 用
@@ -45,7 +47,7 @@ class UniFlowMiyazakiApp extends StatelessWidget {
 // ==========================================
 class AppStorage {
   // ---------------------------------------------------------------------------
-  // 状態データ（メモリ上のキャッシュ）
+  // 状態データ（メモリ上のキャッシュ）- 初期状態は最小限にする
   // ---------------------------------------------------------------------------
   static double _gpa = 3.24;
   static int _credits = 68;
@@ -58,16 +60,7 @@ class AppStorage {
     'M003': {'absence': 0, 'lateness': 0},
   };
 
-  // app_storage.dart に追加
-  static List<Map<String, dynamic>> searchLectures(String query) {
-    if (query.isEmpty) return [];
-    return syllabusMaster.values.where((lecture) {
-      return lecture['title'].toString().contains(query) || 
-            lecture['professor'].toString().contains(query);
-    }).toList();
-  }
-
-  /// シラバス情報（個別遅刻換算レート: latenessRate を含む）
+  /// シラバス情報
   static Map<String, Map<String, dynamic>> syllabusMaster = {
     'M001': {
       'id': 'M001',
@@ -98,7 +91,7 @@ class AppStorage {
     },
   };
 
-  /// 時間割配置データ {曜日インデックス: {時限インデックス: 講義ID}}
+  /// 時間割配置データ
   static Map<int, Map<int, String>> userTimetableCodes = {
     0: {1: 'M001'}, // 月曜2限
     2: {2: 'M002'}, // 水曜3限
@@ -114,7 +107,7 @@ class AppStorage {
   static const String _keyTimetable = 'uniflow_user_timetable';
 
   // ---------------------------------------------------------------------------
-  // 🔄 永続化ストレージ制御 (Save & Load)
+  // 🔄 永続化ストレージ制御 (改良版 Save & Load)
   // ---------------------------------------------------------------------------
 
   /// アプリ起動時にローカルストレージからユーザーデータを復元するメソッド
@@ -129,7 +122,8 @@ class AppStorage {
       final String? logJson = prefs.getString(_keyLog);
       if (logJson != null) {
         _attendanceLog.clear();
-        _attendanceLog.addAll(List<Map<String, dynamic>>.from(jsonDecode(logJson)));
+        final List<dynamic> decodedList = jsonDecode(logJson);
+        _attendanceLog.addAll(decodedList.map((e) => Map<String, dynamic>.from(e)));
       }
 
       // 3. 出席カウンター
@@ -137,8 +131,11 @@ class AppStorage {
       if (countsJson != null) {
         final Map<String, dynamic> decoded = jsonDecode(countsJson);
         _attendanceCounts = decoded.map((key, value) {
-          final map = value as Map<String, dynamic>;
-          return MapEntry(key, {'absence': map['absence'] as int, 'lateness': map['lateness'] as int});
+          final map = Map<String, dynamic>.from(value);
+          return MapEntry(key, {
+            'absence': (map['absence'] as num).toInt(), 
+            'lateness': (map['lateness'] as num).toInt()
+          });
         });
       }
 
@@ -153,39 +150,51 @@ class AppStorage {
       final String? timetableJson = prefs.getString(_keyTimetable);
       if (timetableJson != null) {
         final Map<String, dynamic> decoded = jsonDecode(timetableJson);
-        userTimetableCodes = decoded.map((key, value) {
+        userTimetableCodes.clear(); // 既存の初期配置をクリアして上書き
+        decoded.forEach((key, value) {
           final Map<int, String> innerMap = {};
-          (value as Map<String, dynamic>).forEach((pKey, pValue) {
+          Map<String, dynamic>.from(value).forEach((pKey, pValue) {
             innerMap[int.parse(pKey)] = pValue.toString();
           });
-          return MapEntry(int.parse(key), innerMap);
+          userTimetableCodes[int.parse(key)] = innerMap;
         });
       }
-      print("📦 [AppStorage] ユーザーデータを正常にローカルから復元しました。");
+      print("📦 [AppStorage] ユーザーデータを完全に復元しました。");
     } catch (e) {
-      print("🚨 [AppStorage] データ復元中にエラーが発生しました(初期値で稼働します): $e");
+      print("🚨 [AppStorage] データ復元中にエラーが発生しました: $e");
     }
   }
 
-  /// 現在のメモリ状態をローカルストレージに非同期保存する内部関数
+  /// 現在のメモリ状態をローカルストレージに非同期保存する内部関数（安全な型変換版）
   static Future<void> _saveToStorage() async {
     final prefs = await SharedPreferences.getInstance();
     try {
       await prefs.setDouble(_keyGpa, _gpa);
       await prefs.setInt(_keyCredits, _credits);
       await prefs.setString(_keyLog, jsonEncode(_attendanceLog));
+      
+      // jsonEncodeがクラッシュしないように厳密に型をStringキーに変換して保存
       await prefs.setString(_keyCounts, jsonEncode(_attendanceCounts));
       await prefs.setString(_keySyllabus, jsonEncode(syllabusMaster));
 
-      // Map<int, Map<int, String>> を JSON変換可能な型にキャストして保存
-      final Map<String, dynamic> timetableToSave = userTimetableCodes.map(
-        (key, value) => MapEntry(key.toString(), value.map((pKey, pValue) => MapEntry(pKey.toString(), pValue))),
-      );
+      // Map<int, Map<int, String>> を完全な Map<String, Map<String, String>> に変換して安全にJSON化
+      final Map<String, Map<String, String>> timetableToSave = {};
+      userTimetableCodes.forEach((dayKey, periodMap) {
+        final Map<String, String> stringPeriodMap = {};
+        periodMap.forEach((periodKey, lectureId) {
+          stringPeriodMap[periodKey.toString()] = lectureId;
+        });
+        timetableToSave[dayKey.toString()] = stringPeriodMap;
+      });
+      
       await prefs.setString(_keyTimetable, jsonEncode(timetableToSave));
+      print("💾 [AppStorage] データを正常にストレージへ永続化しました。");
     } catch (e) {
       print("🚨 [AppStorage] データの自動保存に失敗しました: $e");
     }
   }
+
+  // (※ これ以降に記述されているゲッター、セッター、addNewLectureなどのメソッドは変更不要です。そのまま残してください)
 
   // ---------------------------------------------------------------------------
   // ゲッター & セッター (安全ガード + 自動セーブを統合)

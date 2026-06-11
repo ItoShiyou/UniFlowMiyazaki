@@ -47,26 +47,30 @@ class UniFlowMiyazakiApp extends StatelessWidget {
 // ==========================================
 class AppStorage {
   // ---------------------------------------------------------------------------
-  // 状態データ（メモリ上のキャッシュ）- 初期状態は最小限にする
+  // 状態データ（メモリ上のキャッシュ）- 【出荷状態】すべて初期化・空に設定
   // ---------------------------------------------------------------------------
-  static double _gpa = 3.24;
-  static int _credits = 68;
+  static double _gpa = 0.0;
+  static int _credits = 0;
   static final List<Map<String, dynamic>> _attendanceLog = [];
 
   /// 各講義の 欠席数(absence) と 遅刻数(lateness)
-  static Map<String, Map<String, int>> _attendanceCounts = {
-    
-  };
+  static Map<String, Map<String, int>> _attendanceCounts = {};
 
   /// シラバス情報
-  static Map<String, Map<String, dynamic>> syllabusMaster = {
-    
-  };
+  static Map<String, Map<String, dynamic>> syllabusMaster = {};
 
   /// 時間割配置データ
   static Map<int, Map<int, String>> userTimetableCodes = {
-    
+    0: {}, // 月
+    1: {}, // 火
+    2: {}, // 水
+    3: {}, // 木
+    4: {}, // 金
   };
+
+  /// 【新規】ユーザー作成のメモ一覧
+  /// 構造: {'id': String, 'title': String, 'content': String, 'priority': int (3=高, 2=中, 1=低), 'createdAt': String}
+  static List<Map<String, dynamic>> _memos = [];
 
   // ストレージ保存用の固定キー名
   static const String _keyGpa = 'uniflow_gpa';
@@ -75,18 +79,19 @@ class AppStorage {
   static const String _keyCounts = 'uniflow_attendance_counts';
   static const String _keySyllabus = 'uniflow_syllabus_master';
   static const String _keyTimetable = 'uniflow_user_timetable';
+  static const String _keyMemos = 'uniflow_user_memos'; // メモ用のキー
 
   // ---------------------------------------------------------------------------
-  // 🔄 永続化ストレージ制御 (改良版 Save & Load)
+  // 🔄 永続化ストレージ制御 (Save & Load)
   // ---------------------------------------------------------------------------
 
   /// アプリ起動時にローカルストレージからユーザーデータを復元するメソッド
   static Future<void> loadFromStorage() async {
     final prefs = await SharedPreferences.getInstance();
     try {
-      // 1. GPAと単位数
-      _gpa = prefs.getDouble(_keyGpa) ?? 3.24;
-      _credits = prefs.getInt(_keyCredits) ?? 68;
+      // 出荷時のデフォルト値を 0.0 / 0 に変更
+      _gpa = prefs.getDouble(_keyGpa) ?? 0.0;
+      _credits = prefs.getInt(_keyCredits) ?? 0;
 
       // 2. 出席ログ
       final String? logJson = prefs.getString(_keyLog);
@@ -120,7 +125,7 @@ class AppStorage {
       final String? timetableJson = prefs.getString(_keyTimetable);
       if (timetableJson != null) {
         final Map<String, dynamic> decoded = jsonDecode(timetableJson);
-        userTimetableCodes.clear(); // 既存の初期配置をクリアして上書き
+        userTimetableCodes.clear(); 
         decoded.forEach((key, value) {
           final Map<int, String> innerMap = {};
           Map<String, dynamic>.from(value).forEach((pKey, pValue) {
@@ -129,25 +134,31 @@ class AppStorage {
           userTimetableCodes[int.parse(key)] = innerMap;
         });
       }
+
+      // 【新規追加】メモデータのロード
+      final String? memosJson = prefs.getString(_keyMemos);
+      if (memosJson != null) {
+        _memos.clear();
+        final List<dynamic> decodedMemos = jsonDecode(memosJson);
+        _memos.addAll(decodedMemos.map((e) => Map<String, dynamic>.from(e)));
+      }
+
       print("📦 [AppStorage] ユーザーデータを完全に復元しました。");
     } catch (e) {
       print("🚨 [AppStorage] データ復元中にエラーが発生しました: $e");
     }
   }
 
-  /// 現在のメモリ状態をローカルストレージに非同期保存する内部関数（安全な型変換版）
+  /// 現在のメモリ状態をローカルストレージに非同期保存する内部関数
   static Future<void> _saveToStorage() async {
     final prefs = await SharedPreferences.getInstance();
     try {
       await prefs.setDouble(_keyGpa, _gpa);
       await prefs.setInt(_keyCredits, _credits);
       await prefs.setString(_keyLog, jsonEncode(_attendanceLog));
-      
-      // jsonEncodeがクラッシュしないように厳密に型をStringキーに変換して保存
       await prefs.setString(_keyCounts, jsonEncode(_attendanceCounts));
       await prefs.setString(_keySyllabus, jsonEncode(syllabusMaster));
 
-      // Map<int, Map<int, String>> を完全な Map<String, Map<String, String>> に変換して安全にJSON化
       final Map<String, Map<String, String>> timetableToSave = {};
       userTimetableCodes.forEach((dayKey, periodMap) {
         final Map<String, String> stringPeriodMap = {};
@@ -156,18 +167,19 @@ class AppStorage {
         });
         timetableToSave[dayKey.toString()] = stringPeriodMap;
       });
-      
       await prefs.setString(_keyTimetable, jsonEncode(timetableToSave));
+      
+      // メモデータの保存
+      await prefs.setString(_keyMemos, jsonEncode(_memos));
+
       print("💾 [AppStorage] データを正常にストレージへ永続化しました。");
     } catch (e) {
       print("🚨 [AppStorage] データの自動保存に失敗しました: $e");
     }
   }
 
-  // (※ これ以降に記述されているゲッター、セッター、addNewLectureなどのメソッドは変更不要です。そのまま残してください)
-
   // ---------------------------------------------------------------------------
-  // ゲッター & セッター (安全ガード + 自動セーブを統合)
+  // ゲッター & セッター 
   // ---------------------------------------------------------------------------
   static double getGpa() => _gpa;
   static int getCredits() => _credits;
@@ -176,6 +188,31 @@ class AppStorage {
   static int getAbsenceCount(String id) => _attendanceCounts[id]?['absence'] ?? 0;
   static int getLatenessCount(String id) => _attendanceCounts[id]?['lateness'] ?? 0;
   static int getLatenessRate(String id) => syllabusMaster[id]?['latenessRate'] ?? 3;
+
+  // メモ機能用ゲッター（重要度順 3=高、2=中、1=低 にソートして返す）
+  static List<Map<String, dynamic>> getMemosSortedByPriority() {
+    List<Map<String, dynamic>> sorted = List.from(_memos);
+    sorted.sort((a, b) => (b['priority'] as int).compareTo(a['priority'] as int));
+    return sorted;
+  }
+
+  /// メモの新規追加
+  static void addMemo(String title, String content, int priority) {
+    _memos.add({
+      'id': 'MEMO_${DateTime.now().millisecondsSinceEpoch}',
+      'title': title,
+      'content': content,
+      'priority': priority,
+      'createdAt': DateTime.now().toIso8601String(),
+    });
+    _saveToStorage();
+  }
+
+  /// メモの削除
+  static void removeMemo(String id) {
+    _memos.removeWhere((memo) => memo['id'] == id);
+    _saveToStorage();
+  }
 
   static void setAbsenceCount(String id, int count) {
     if (!_attendanceCounts.containsKey(id)) {
@@ -194,21 +231,19 @@ class AppStorage {
   }
 
   static void setLatenessRate(String id, int rate) {
-    if (!syllabusMaster.containsKey(id)) return; // 存在しない講義は何もしない
+    if (!syllabusMaster.containsKey(id)) return; 
     syllabusMaster[id]?['latenessRate'] = rate;
     _saveToStorage();
   }
 
-  /// 実質欠席数を計算する（直接の欠席数 + 遅刻数 / 換算レート）
   static int getCalculatedTotalAbsence(String id) {
     int directAbsence = getAbsenceCount(id);
     int lateness = getLatenessCount(id);
     int rate = getLatenessRate(id);
-    if (rate <= 0) return directAbsence; // ゼロ除算ディフェンス
+    if (rate <= 0) return directAbsence; 
     return directAbsence + (lateness ~/ rate);
   }
 
-  /// 警告対象の講義を判定（実質欠席数が3回以上のもの）
   static List<Map<String, dynamic>> getAlertLectures() {
     List<Map<String, dynamic>> alerts = [];
     _attendanceCounts.forEach((id, _) {
@@ -228,7 +263,6 @@ class AppStorage {
     return alerts;
   }
 
-  /// 指定された曜日の講義リストを時限順に並び替えて取得する（ホーム画面用）
   static List<Map<String, dynamic>> getTodayLectures(int dayIdx) {
     List<Map<String, dynamic>> todayList = [];
     final periodMap = userTimetableCodes[dayIdx];
@@ -275,19 +309,16 @@ class AppStorage {
     _saveToStorage();
   }
 
-  /// 【新規追加】新しい講義をマスターデータと時間割コードに登録する
   static void addNewLecture({
     required String title,
     required String room,
     required String professor,
-    required String type, // 'major'（専門） 或者 'liberal'（教養）
-    required int dayIdx,  // 0=月 ~ 4=金
-    required int periodIdx, // 0=1限 ~ 4=5限
+    required String type, 
+    required int dayIdx,  
+    required int periodIdx, 
   }) {
-    // ユニークなIDを一意に生成
     String newId = 'M_${DateTime.now().millisecondsSinceEpoch}';
 
-    // 1. シラバス（マスターデータ）に登録
     syllabusMaster[newId] = {
       'id': newId,
       'title': title,
@@ -295,37 +326,32 @@ class AppStorage {
       'professor': professor,
       'type': type,
       'evaluation': '未設定（シラバスを確認してください）',
-      'latenessRate': 3, // デフォルトは3回遅刻で1欠席
+      'latenessRate': 3, 
     };
 
-    // 2. 出席・遅刻カウンターの初期化
     _attendanceCounts[newId] = {'absence': 0, 'lateness': 0};
 
-    // 3. 該当する曜日・時限のマップに講義IDを紐付け
     if (userTimetableCodes[dayIdx] == null) {
       userTimetableCodes[dayIdx] = {};
     }
     userTimetableCodes[dayIdx]![periodIdx] = newId;
 
-    // 自動保存
     _saveToStorage();
   }
 
-  /// 【新規追加】指定された曜日・時限の講義登録を解除（削除）する
   static void removeLectureFromTimetable(int dayIdx, int periodIdx) {
     if (userTimetableCodes[dayIdx] != null) {
       String? id = userTimetableCodes[dayIdx]![periodIdx];
       if (id != null) {
         userTimetableCodes[dayIdx]!.remove(periodIdx);
-        // メモリリーク防止のため、登録解除された講義に付随する個別データもクリーンアップ
         syllabusMaster.remove(id);
         _attendanceCounts.remove(id);
       }
-      // 自動保存
       _saveToStorage();
     }
   }
 }
+
 // ==========================================
 // 💻 【2. メイン外殻】ナビゲーション基盤
 // ==========================================
@@ -341,7 +367,13 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 
   void _onTabChanged(int index) {
     setState(() {
-      _currentIndex = index;
+      // 📊 成績タブの削除に伴うインデックス変換処理
+      // ナビゲーションバーの3項目目（index=2）の「設定」を、IndexedStackの4つ目（index=3）にマッピング
+      if (index >= 2) {
+        _currentIndex = index + 1; // AnalyticsScreen(2) をスキップ
+      } else {
+        _currentIndex = index;
+      }
     });
   }
 
@@ -363,7 +395,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
             children: [
               IconButton(
                 icon: const Icon(Icons.notifications_none_outlined),
-                onPressed: () => _onTabChanged(3),
+                // 旧 index 3 (設定タブ) への遷移処理
+                onPressed: () => setState(() => _currentIndex = 3),
               ),
               if (alertCount > 0)
                 Positioned(
@@ -392,11 +425,11 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         index: _currentIndex,
         children: [
           HomeScreen(
-            onNavigateToAnalytics: () => _onTabChanged(2),
-            onNavigateToTimetable: () => _onTabChanged(1),
+            onNavigateToAnalytics: () => setState(() => _currentIndex = 2), // バックエンド構造上は保持
+            onNavigateToTimetable: () => setState(() => _currentIndex = 1),
           ),
           const TimetableScreen(),
-          const AnalyticsScreen(),
+          const AnalyticsScreen(), // 非表示状態（IndexedStack内には保持）
           const NotificationSettingsScreen(),
         ],
       ),
@@ -405,7 +438,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 10, spreadRadius: 1)],
         ),
         child: BottomNavigationBar(
-          currentIndex: _currentIndex,
+          // 表示上のインデックスを補正
+          currentIndex: _currentIndex >= 3 ? _currentIndex - 1 : _currentIndex,
           onTap: _onTabChanged,
           type: BottomNavigationBarType.fixed,
           selectedItemColor: Theme.of(context).colorScheme.primary,
@@ -415,7 +449,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           items: const [
             BottomNavigationBarItem(icon: Icon(Icons.dashboard_outlined), activeIcon: Icon(Icons.dashboard), label: 'ホーム'),
             BottomNavigationBarItem(icon: Icon(Icons.calendar_view_week_outlined), activeIcon: Icon(Icons.calendar_view_week), label: '時間割'),
-            BottomNavigationBarItem(icon: Icon(Icons.bar_chart_outlined), activeIcon: Icon(Icons.bar_chart), label: '成績・進捗'),
+            // 📊 成績・進捗のボトムタブ項目を非表示化（コメントアウト）
+            // BottomNavigationBarItem(icon: Icon(Icons.bar_chart_outlined), activeIcon: Icon(Icons.bar_chart), label: '成績・進捗'),
             BottomNavigationBarItem(icon: Icon(Icons.settings_outlined), activeIcon: Icon(Icons.settings), label: '設定'),
           ],
         ),
@@ -425,7 +460,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 }
 
 // ==========================================
-// 📱 【3. タブ1】ホーム画面（動的予定追従）
+// 📱 【3. タブ1】ホーム画面（動的予定追従 ＆ メモ一覧）
 // ==========================================
 class HomeScreen extends StatefulWidget {
   final VoidCallback onNavigateToAnalytics;
@@ -445,13 +480,77 @@ class _HomeScreenState extends State<HomeScreen> {
     _attendanceCount = AppStorage.getAttendanceLog().length;
   }
 
-  
-  // 🎯 ホームの出席登録ボタンを押したときの判定ロジック
+  // 📝 メモ新規作成ダイアログ
+  void _showAddMemoDialog(BuildContext context) {
+    final titleController = TextEditingController();
+    final contentController = TextEditingController();
+    int selectedPriority = 2; // デフォルト：中
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(builder: (context, setModalState) {
+          return AlertDialog(
+            title: const Text('メモ・タスクの追加', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: titleController,
+                  decoration: const InputDecoration(labelText: 'タイトル', isDense: true),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: contentController,
+                  decoration: const InputDecoration(labelText: '内容（詳細）', isDense: true),
+                  maxLines: 2,
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    const Text('重要度: ', style: TextStyle(fontSize: 13)),
+                    ChoiceChip(
+                      label: const Text('低', style: TextStyle(fontSize: 12)),
+                      selected: selectedPriority == 1,
+                      onSelected: (val) => setModalState(() => selectedPriority = 1),
+                    ),
+                    const SizedBox(width: 4),
+                    ChoiceChip(
+                      label: const Text('中', style: TextStyle(fontSize: 12)),
+                      selected: selectedPriority == 2,
+                      onSelected: (val) => setModalState(() => selectedPriority = 2),
+                    ),
+                    const SizedBox(width: 4),
+                    ChoiceChip(
+                      label: const Text('高', style: TextStyle(fontSize: 12)),
+                      selected: selectedPriority == 3,
+                      selectedColor: Colors.red.shade100,
+                      onSelected: (val) => setModalState(() => selectedPriority = 3),
+                    ),
+                  ],
+                )
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('キャンセル')),
+              ElevatedButton(
+                onPressed: () {
+                  if (titleController.text.trim().isEmpty) return;
+                  AppStorage.addMemo(titleController.text.trim(), contentController.text.trim(), selectedPriority);
+                  setState(() {});
+                  Navigator.pop(context);
+                },
+                child: const Text('追加'),
+              ),
+            ],
+          );
+        });
+      },
+    );
+  }
+
   void _handleAttendance(BuildContext context) {
     final now = DateTime.now();
-    
-    // 1. 曜日インデックスを取得 (DateTimeは月曜=1, 金曜=5, 日曜=7)
-    // 時間割の月〜金 (0〜4) にマッピング
     int dayIdx = now.weekday - 1; 
     
     if (dayIdx > 4) {
@@ -461,20 +560,19 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    // 2. 現在時刻（時・分）から、何限目（periodIdx）かを判定
     int? periodIdx;
-    final currentTime = now.hour * 60 + now.minute; // 判定しやすいように分単位に換算
+    final currentTime = now.hour * 60 + now.minute;
 
-    if (currentTime >= 520 && currentTime <= 610) {        // 08:40 - 10:10
-      periodIdx = 0; // 1限
-    } else if (currentTime >= 630 && currentTime <= 720) {  // 10:30 - 12:00
-      periodIdx = 1; // 2限
-    } else if (currentTime >= 780 && currentTime <= 870) {  // 13:00 - 14:30
-      periodIdx = 2; // 3限
-    } else if (currentTime >= 890 && currentTime <= 980) {  // 14:50 - 16:20
-      periodIdx = 3; // 4限
-    } else if (currentTime >= 1000 && currentTime <= 1090) { // 16:40 - 18:10
-      periodIdx = 4; // 5限
+    if (currentTime >= 520 && currentTime <= 610) {        
+      periodIdx = 0; 
+    } else if (currentTime >= 630 && currentTime <= 720) {  
+      periodIdx = 1; 
+    } else if (currentTime >= 780 && currentTime <= 870) {  
+      periodIdx = 2; 
+    } else if (currentTime >= 890 && currentTime <= 980) {  
+      periodIdx = 3; 
+    } else if (currentTime >= 1000 && currentTime <= 1090) { 
+      periodIdx = 4; 
     }
 
     if (periodIdx == null) {
@@ -484,7 +582,6 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    // 3. AppStorage から現在のコマに登録されている時間割コードを取得
     String? code = AppStorage.userTimetableCodes[dayIdx]?[periodIdx];
     
     if (code == null || AppStorage.syllabusMaster[code] == null) {
@@ -497,7 +594,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final lecture = AppStorage.syllabusMaster[code]!;
     final lectureId = lecture['id'];
 
-    // 4. 自動判定された講義の出席/欠席を管理する確認ダイアログを表示
     showDialog(
       context: context,
       builder: (context) {
@@ -533,11 +629,9 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: () => Navigator.pop(context),
               child: const Text('閉じる'),
             ),
-            // もし「出席した（間違えてついていた欠席を取り消す）」などのクイック処理を入れる場合
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
               onPressed: () {
-                // 例：もし直前に「欠席」ボタンなどを押してしまっていた場合、ここからカウントを戻すなどのロジックが組めます
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(content: Text('『${lecture['title']}』の出席確認を行いました。'), backgroundColor: Colors.green),
@@ -557,8 +651,7 @@ class _HomeScreenState extends State<HomeScreen> {
     int displayAttendanceRate = 92 + _attendanceCount;
     if (displayAttendanceRate > 100) displayAttendanceRate = 100;
 
-    // 現在のシステム時刻から曜日を取得し、今日の予定を動的に抽出
-    int weekday = DateTime.now().weekday; // 1=月...5=金, 6=土, 7=日
+    int weekday = DateTime.now().weekday; 
     int dayIdx = weekday - 1; 
 
     List<Map<String, dynamic>> todayLectures = [];
@@ -567,6 +660,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     final alertLectures = AppStorage.getAlertLectures();
+    final memos = AppStorage.getMemosSortedByPriority(); // 重要度順に並び替えられたメモの取得
+
     final daysJa = ['月', '火', '水', '木', '金', '土', '日'];
     String todayStr = "${DateTime.now().month}/${DateTime.now().day} (${daysJa[weekday - 1]})";
 
@@ -654,18 +749,75 @@ class _HomeScreenState extends State<HomeScreen> {
           );
         }),
 
-        Card(
-          child: ListTile(
-            leading: const CircleAvatar(backgroundColor: Colors.amber, child: Icon(Icons.assignment, color: Colors.white)),
-            title: const Text('アルゴリズム実装課題'),
-            subtitle: const Text('締切: 残り2日（金曜 23:59）'),
-            trailing: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(color: Colors.red.shade100, borderRadius: BorderRadius.circular(4)),
-              child: const Text('要警戒', style: TextStyle(color: Colors.red, fontSize: 10, fontWeight: FontWeight.bold)),
-            ),
-          ),
+        const SizedBox(height: 20),
+        // 📝 【新規機能】重要度順のメモセクション
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('マイメモ・タスク (重要度順)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            IconButton(
+              icon: const Icon(Icons.add_circle_outline, color: Colors.blue),
+              onPressed: () => _showAddMemoDialog(context),
+            )
+          ],
         ),
+        const SizedBox(height: 8),
+
+        if (memos.isEmpty)
+          Card(
+            color: Colors.grey.shade50,
+            elevation: 0,
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Center(
+                child: Text(
+                  '登録されたメモや課題はありません。',
+                  style: TextStyle(color: Colors.grey.shade500, fontSize: 13),
+                ),
+              ),
+            ),
+          )
+        else
+          ...memos.map((memo) {
+            // 重要度（3=高, 2=中, 1=低）に応じたカラーリング設定
+            Color priorityColor = Colors.grey;
+            String priorityText = '低';
+            if (memo['priority'] == 3) {
+              priorityColor = Colors.red;
+              priorityText = '高';
+            } else if (memo['priority'] == 2) {
+              priorityColor = Colors.orange;
+              priorityText = '中';
+            }
+
+            return Card(
+              key: Key(memo['id']),
+              margin: const EdgeInsets.symmetric(vertical: 4),
+              child: ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: priorityColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: priorityColor, width: 1),
+                  ),
+                  child: Text(
+                    priorityText,
+                    style: TextStyle(color: priorityColor, fontSize: 10, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                title: Text(memo['title'], style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                subtitle: memo['content'].toString().isNotEmpty ? Text(memo['content'], style: const TextStyle(fontSize: 12)) : null,
+                trailing: IconButton(
+                  icon: const Icon(Icons.delete_outline, size: 18, color: Colors.grey),
+                  onPressed: () {
+                    AppStorage.removeMemo(memo['id']);
+                    setState(() {});
+                  },
+                ),
+              ),
+            );
+          }),
       ],
     );
   }
@@ -722,7 +874,7 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 // ==========================================
-// 🗓️ 【4. タブ2】時間割マトリクス＆詳細・追加設定（修正版）
+// 🗓️ 【4. タブ2】時間割マトリクス＆詳細・追加設定
 // ==========================================
 class TimetableScreen extends StatefulWidget {
   const TimetableScreen({super.key});
@@ -732,7 +884,6 @@ class TimetableScreen extends StatefulWidget {
 }
 
 class _TimetableScreenState extends State<TimetableScreen> {
-  // シラバスコード入力用のコントローラー
   final TextEditingController _codeController = TextEditingController();
 
   @override
@@ -741,22 +892,17 @@ class _TimetableScreenState extends State<TimetableScreen> {
     super.dispose();
   }
 
-  // 🗓️ 改善版：JSONシラバス全件から複合条件で絞り込みができる講義追加ダイアログ
   void _showAddLectureSearchDialog(BuildContext context, int dayIdx, int periodIdx) {
-    // 検索条件用のコントローラーと選択値の初期化
     final TextEditingController titleController = TextEditingController();
     final TextEditingController idController = TextEditingController();
     final TextEditingController professorController = TextEditingController();
     
-    // タップされたコマの曜日・時限を初期選択値にする（nullは「指定なし」）
     int? selectedDayIdx = dayIdx;
     int? selectedPeriodIdx = periodIdx;
 
     List<Map<String, dynamic>> searchResults = [];
 
-    // フィルタリングを行うローカル関数
     void performSearch(StateSetter setModalState) {
-      // 🚨 【修正ポイント】JSONから読み込まれたシラバス全件データをサービスから直接取得
       List<Map<String, dynamic>> allLectures = SyllabusService.allLectures; 
 
       final titleQuery = titleController.text.trim().toLowerCase();
@@ -765,23 +911,18 @@ class _TimetableScreenState extends State<TimetableScreen> {
 
       setModalState(() {
         searchResults = allLectures.where((lecture) {
-          // 1. 講義名の部分一致（一部入力でも検索可能）
           if (titleQuery.isNotEmpty && !lecture['title'].toString().toLowerCase().contains(titleQuery)) {
             return false;
           }
-          // 2. ID（または時間割コード）の部分・完全一致
           if (idQuery.isNotEmpty && !lecture['id'].toString().toLowerCase().contains(idQuery)) {
             return false;
           }
-          // 3. 担当教員名の部分一致（一部入力でも検索可能）
           if (professorQuery.isNotEmpty && !lecture['professor'].toString().toLowerCase().contains(professorQuery)) {
             return false;
           }
-          // 4. 実施曜日の完全一致
           if (selectedDayIdx != null && lecture['dayIdx'] != selectedDayIdx) {
             return false;
           }
-          // 5. 実施時限の完全一致
           if (selectedPeriodIdx != null && lecture['periodIdx'] != selectedPeriodIdx) {
             return false;
           }
@@ -796,7 +937,6 @@ class _TimetableScreenState extends State<TimetableScreen> {
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (context) {
         return StatefulBuilder(builder: (context, setModalState) {
-          // 初回展開時、かつすべての入力欄が空のときに自動で初期検索（タップしたコマの条件）を走らせる
           if (searchResults.isEmpty && 
               titleController.text.isEmpty && 
               idController.text.isEmpty && 
@@ -809,19 +949,14 @@ class _TimetableScreenState extends State<TimetableScreen> {
               top: 20,
               left: 20,
               right: 20,
-              bottom: MediaQuery.of(context).viewInsets.bottom + 20, // キーボードを避ける
+              bottom: MediaQuery.of(context).viewInsets.bottom + 20, 
             ),
-            height: MediaQuery.of(context).size.height * 0.85, // 検索エリア確保のため高さを拡張
+            height: MediaQuery.of(context).size.height * 0.85, 
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  '条件を指定して講義を検索',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                ),
+                const Text('条件を指定して講義を検索', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 12),
-                
-                // 1. 講義名入力欄
                 TextField(
                   controller: titleController,
                   decoration: const InputDecoration(
@@ -832,8 +967,6 @@ class _TimetableScreenState extends State<TimetableScreen> {
                   onChanged: (_) => performSearch(setModalState),
                 ),
                 const SizedBox(height: 8),
-                
-                // 2. ID & 教員名入力欄（横並び）
                 Row(
                   children: [
                     Expanded(
@@ -854,8 +987,6 @@ class _TimetableScreenState extends State<TimetableScreen> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                
-                // 3. 曜日 & 時限 選択ドロップダウン（横並び）
                 Row(
                   children: [
                     Expanded(
@@ -898,8 +1029,6 @@ class _TimetableScreenState extends State<TimetableScreen> {
                   ],
                 ),
                 const Divider(height: 24),
-
-                // 4. 検索結果表示エリア
                 Expanded(
                   child: searchResults.isEmpty
                       ? const Center(child: Text('条件に一致する講義が見つかりません', style: TextStyle(color: Colors.grey, fontSize: 13)))
@@ -922,7 +1051,6 @@ class _TimetableScreenState extends State<TimetableScreen> {
                               isThreeLine: true,
                               trailing: const Icon(Icons.add_circle_outline, size: 20, color: Colors.blue),
                               onTap: () {
-                                // 選択された講義を登録（講義自体が曜日情報を持っていればそれを優先、なければタップしたコマに配置）
                                 AppStorage.addNewLecture(
                                   title: lecture['title'],
                                   room: lecture['room'],
@@ -938,8 +1066,6 @@ class _TimetableScreenState extends State<TimetableScreen> {
                           },
                         ),
                 ),
-                
-                // 5. 手動登録への救済導線
                 const Divider(height: 1),
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 4.0),
@@ -963,8 +1089,7 @@ class _TimetableScreenState extends State<TimetableScreen> {
     );
   }
 
-  /// 既存の講義詳細表示モーダル（削除ボタン統合版）
-  /// 講義詳細表示モーダル（レイアウト崩れ対策・削除ボタン統合版）
+  
   void _showLectureDetails(BuildContext context, Map<String, dynamic> lecture, int dayIdx, int periodIdx) {
     showModalBottomSheet(
       context: context,
@@ -980,7 +1105,12 @@ class _TimetableScreenState extends State<TimetableScreen> {
             int totalAbsence = AppStorage.getCalculatedTotalAbsence(lectureId);
 
             return Padding(
-              padding: const EdgeInsets.all(20.0),
+              padding: EdgeInsets.only(
+                top: 20,
+                left: 20,
+                right: 20,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 20, // キーボード表示時の底上げ
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -988,14 +1118,13 @@ class _TimetableScreenState extends State<TimetableScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      // 🚨 長い講義名でも右側のバッジを押し出さずに自動改行させるための Expanded
                       Expanded(
                         child: Text(
                           lecture['title'], 
                           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                         ),
                       ),
-                      const SizedBox(width: 8), // タイトルとバッジの間の隙間を確保
+                      const SizedBox(width: 8), 
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
@@ -1012,6 +1141,8 @@ class _TimetableScreenState extends State<TimetableScreen> {
                   const SizedBox(height: 4),
                   Text('教室: ${lecture['room']} | 担当: ${lecture['professor']}', style: const TextStyle(color: Colors.grey, fontSize: 12)),
                   const Divider(height: 20),
+                  
+                  // 欠席回数操作
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -1037,6 +1168,8 @@ class _TimetableScreenState extends State<TimetableScreen> {
                       )
                     ],
                   ),
+                  
+                  // 遅刻回数操作
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -1063,6 +1196,8 @@ class _TimetableScreenState extends State<TimetableScreen> {
                     ],
                   ),
                   const SizedBox(height: 6),
+                  
+                  // 換算ルール
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                     decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(8)),
@@ -1090,12 +1225,34 @@ class _TimetableScreenState extends State<TimetableScreen> {
                       ],
                     ),
                   ),
-                  const Divider(height: 24),
+                  const Divider(height: 20),
                   const Text('【評価基準】', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                   Text(lecture['evaluation'] ?? '未設定', style: const TextStyle(fontSize: 12)),
-                  const SizedBox(height: 16),
                   
-                  // 🚨 講義の登録解除（削除）ボタン
+                  const Divider(height: 24),
+                  
+                  // ✨ 【新規追加】この授業のメモを追加するボタン
+                  SizedBox(
+                    width: double.infinity,
+                    height: 40,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Theme.of(context).colorScheme.secondary.withOpacity(0.1),
+                        foregroundColor: Theme.of(context).colorScheme.secondary,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      icon: const Icon(Icons.add_comment_outlined, size: 18),
+                      label: const Text('この講義のメモ・タスクを追加', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                      onPressed: () {
+                        Navigator.pop(context); // 詳細シートを一度閉じる
+                        _showAddMemoFromLectureDialog(context, lecture['title']);
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  
+                  // 講義削除ボタン
                   SizedBox(
                     width: double.infinity,
                     height: 40,
@@ -1122,9 +1279,9 @@ class _TimetableScreenState extends State<TimetableScreen> {
                                 style: TextButton.styleFrom(foregroundColor: Colors.red),
                                 onPressed: () {
                                   AppStorage.removeLectureFromTimetable(dayIdx, periodIdx);
-                                  Navigator.pop(context); // ダイアログを閉じる
-                                  Navigator.pop(context); // ボトムシートを閉じる
-                                  setState(() {}); // 画面再描画
+                                  Navigator.pop(context); 
+                                  Navigator.pop(context); 
+                                  setState(() {}); 
 
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(content: Text('『${lecture['title']}』を削除しました。'), backgroundColor: Colors.grey.shade800),
@@ -1146,7 +1303,78 @@ class _TimetableScreenState extends State<TimetableScreen> {
       },
     );
   }
-  /// 検索で見つからない場合の手入力ダイアログ
+
+  // ✨ 【新規追加】講義詳細から呼び出される専用のメモ追加ダイアログ
+  void _showAddMemoFromLectureDialog(BuildContext context, String lectureTitle) {
+    final titleController = TextEditingController(text: '[$lectureTitle] ');
+    final contentController = TextEditingController();
+    int selectedPriority = 2; // デフォルト：中
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(builder: (context, setModalState) {
+          return AlertDialog(
+            title: const Text('メモ・タスクの追加', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: titleController,
+                  decoration: const InputDecoration(labelText: 'タイトル', isDense: true),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: contentController,
+                  decoration: const InputDecoration(labelText: '内容（詳細）', isDense: true),
+                  maxLines: 2,
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    const Text('重要度: ', style: TextStyle(fontSize: 13)),
+                    ChoiceChip(
+                      label: const Text('低', style: TextStyle(fontSize: 12)),
+                      selected: selectedPriority == 1,
+                      onSelected: (val) => setModalState(() => selectedPriority = 1),
+                    ),
+                    const SizedBox(width: 4),
+                    ChoiceChip(
+                      label: const Text('中', style: TextStyle(fontSize: 12)),
+                      selected: selectedPriority == 2,
+                      onSelected: (val) => setModalState(() => selectedPriority = 2),
+                    ),
+                    const SizedBox(width: 4),
+                    ChoiceChip(
+                      label: const Text('高', style: TextStyle(fontSize: 12)),
+                      selected: selectedPriority == 3,
+                      selectedColor: Colors.red.shade100,
+                      onSelected: (val) => setModalState(() => selectedPriority = 3),
+                    ),
+                  ],
+                )
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('キャンセル')),
+              ElevatedButton(
+                onPressed: () {
+                  if (titleController.text.trim().isEmpty) return;
+                  AppStorage.addMemo(titleController.text.trim(), contentController.text.trim(), selectedPriority);
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('メモを追加しました（ホーム画面に重要度順で表示されます）'), backgroundColor: Colors.green),
+                  );
+                },
+                child: const Text('追加'),
+              ),
+            ],
+          );
+        });
+      },
+    );
+  }
+
   void _showManualAddDialog(BuildContext context, int dayIdx, int periodIdx) {
     final titleController = TextEditingController();
     final roomController = TextEditingController();
@@ -1210,7 +1438,6 @@ class _TimetableScreenState extends State<TimetableScreen> {
       padding: const EdgeInsets.all(4.0),
       child: Column(
         children: [
-          // 【最上部インテグレーション】宮大シラバス自動連携コード入力欄
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 6.0),
             child: Row(
@@ -1292,7 +1519,6 @@ class _TimetableScreenState extends State<TimetableScreen> {
           ),
           const Divider(height: 8, thickness: 0.5),
 
-          // 曜日ヘッダー
           Row(
             children: [
               const SizedBox(width: 45), 
@@ -1305,7 +1531,6 @@ class _TimetableScreenState extends State<TimetableScreen> {
             ],
           ),
           
-          // 時間割マトリクス本体
           Expanded(
             child: Column(
               children: periods.asMap().entries.map((periodEntry) {
@@ -1436,9 +1661,8 @@ class _TimetableScreenState extends State<TimetableScreen> {
   }
 }
 
-
 // ==========================================
-// 📊 【5. タブ3】成績＆進捗アナリティクス
+// 📊 【5. タブ3】成績＆進捗アナリティクス（一時非表示中）
 // ==========================================
 class AnalyticsScreen extends StatefulWidget {
   const AnalyticsScreen({super.key});
@@ -1448,8 +1672,8 @@ class AnalyticsScreen extends StatefulWidget {
 }
 
 class _AnalyticsScreenState extends State<AnalyticsScreen> {
-  double _currentGpa = 3.24;
-  int _currentCredits = 68;
+  double _currentGpa = 0.0;
+  int _currentCredits = 0;
   int _simulatedAClassesCount = 0;
 
   @override

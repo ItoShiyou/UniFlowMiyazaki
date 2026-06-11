@@ -1,0 +1,54 @@
+name: Deploy Flutter Web to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main  # mainブランチにpushされたときに実行
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. リポジトリのコードをチェックアウト
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Java環境のセットアップ（Flutterの動作に必要）
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'oracle'
+          java-version: '17'
+
+      # 3. Flutter環境のセットアップ
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          architecture: x64
+
+      # 4. 依存パッケージの取得
+      - name: Install dependencies
+        run: flutter pub get
+
+      # 5. Flutter Webのビルド
+      # ※ --base-href の指定により、GitHub Pagesのサブディレクトリに対応させます
+      - name: Build Web Application
+        run: flutter build web --release --base-href "/${{ github.event.repository.name }}/"
+
+      # 6. GitHub Pagesへデプロイするためのアップロード
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+      # 7. 実際に公開（デプロイ）
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

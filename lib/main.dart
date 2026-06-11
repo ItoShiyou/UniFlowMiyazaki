@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:uniflow_miyazaki/storage/app_storage.dart'; // 🚨 プロジェクト名に合わせてパスを調整してください
-import 'package:uniflow_miyazaki/services/syllabus_service.dart';
+import 'package:storage/app_storage.dart'; // 🚨 プロジェクト名に合わせてパスを調整してください
+import 'package:services/syllabus_service.dart';
 
 import 'dart:convert'; // jsonEncode / jsonDecode 用
 import 'package:shared_preferences/shared_preferences.dart'; // SharedPreferences 用
